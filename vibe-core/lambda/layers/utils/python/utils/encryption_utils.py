@@ -1,0 +1,2 @@
+# Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+# Author: Christopher Niven

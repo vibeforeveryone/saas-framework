@@ -1,0 +1,86 @@
+/*
+ * Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+ * Author: Christopher Niven
+ */
+.search-actions {
+  display: flex;
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+}
+
+.amount-cell {
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.status-badge {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-success {
+  background: #e8f5e9;
+  color: var(--success);
+}
+
+.status-warning {
+  background: #fff3e0;
+  color: var(--warning);
+}
+
+.status-danger {
+  background: #ffebee;
+  color: var(--danger);
+}
+
+.status-info {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.status-secondary {
+  background: var(--gray-light);
+  color: var(--text-secondary);
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th {
+  background: var(--gray-lightest);
+  padding: 12px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid var(--gray-light);
+}
+
+.data-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--gray-light);
+}
+
+.data-table tr:hover {
+  background: var(--gray-lightest);
+}
+
+.no-data {
+  text-align: center;
+  padding: var(--space-xxxl);
+  color: var(--text-secondary);
+}
+
+.loading-container {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-xxxl);
+}

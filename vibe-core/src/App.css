@@ -1,0 +1,9 @@
+/*
+ * Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+ * Author: Christopher Niven
+ */
+@import url('./design-system.css');
+
+.App {
+  min-height: 100vh;
+}

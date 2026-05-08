@@ -1,0 +1,28 @@
+{
+  "httpMethod": "POST",
+  "path": "/auth",
+  "pathParameters": null,
+  "queryStringParameters": null,
+  "headers": {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Origin": "http://localhost:3000"
+  },
+  "body": "{\"username\": \"admin\", \"password\": \"admin123\"}",
+  "isBase64Encoded": false,
+  "requestContext": {
+    "customerId": "123456789012",
+    "apiId": "test-api",
+    "protocol": "HTTP/1.1",
+    "httpMethod": "POST",
+    "path": "/auth",
+    "stage": "test",
+    "requestId": "test-request-id-auth",
+    "requestTime": "09/Apr/2015:12:34:56 +0000",
+    "requestTimeEpoch": 1428582896000,
+    "identity": {
+      "sourceIp": "127.0.0.1"
+    }
+  },
+  "stageVariables": null
+}

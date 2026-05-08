@@ -1,0 +1,106 @@
+/*
+ * Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+ * Author: Christopher Niven
+ */
+/* LoginScreen.css */
+.login-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+}
+
+.login-box {
+  background: white;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-xxxl);
+  max-width: 450px;
+  width: 100%;
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: var(--space-xxl);
+}
+
+.login-header h1 {
+  color: var(--primary-blue);
+  margin: 0 0 var(--space-sm) 0;
+  font-size: 2.5rem;
+}
+
+.login-header p {
+  color: var(--text-secondary);
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.login-form {
+  margin-bottom: var(--space-xxl);
+}
+
+.login-footer {
+  border-top: 1px solid var(--gray-light);
+  padding-top: var(--space-lg);
+}
+
+.default-credentials {
+  background-color: var(--gray-lightest);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-lg);
+}
+
+.default-credentials h4 {
+  margin: 0 0 var(--space-sm) 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.default-credentials p {
+  margin: 2px 0;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+}
+
+.default-credentials small {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.app-info {
+  text-align: center;
+}
+
+.app-info p {
+  margin: 5px 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.error-message {
+  background-color: #fdf2f2;
+  color: var(--danger);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-weight: 500;
+}
+
+.success-message {
+  background-color: #f0f9f0;
+  color: var(--success);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-weight: 500;
+}

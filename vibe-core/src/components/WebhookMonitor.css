@@ -1,0 +1,12 @@
+/*
+ * Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+ * Author: Christopher Niven
+ */
+.webhook-item {
+  display: flex;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--gray-lightest);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-sm);
+}

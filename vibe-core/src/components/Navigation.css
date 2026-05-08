@@ -1,0 +1,337 @@
+/*
+ * Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+ * Author: Christopher Niven
+ */
+/* Navigation styles from design system */
+
+/* Base sidebar styles */
+.sidebar {
+  width: 260px;
+  height: 100vh;
+  background: #1a1d29;
+  color: #ffffff;
+  overflow-y: auto;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+}
+
+.sidebar-header {
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  text-align: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-header h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.sidebar-header .subtitle {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  margin-top: 5px;
+}
+
+/* Navigation menu */
+.nav-menu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.nav-menu > li {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Navigation links */
+.nav-menu a {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  color: #b8bcc8;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  gap: 10px;
+  font-size: 0.95rem;
+}
+
+.nav-menu a:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  padding-left: 25px;
+}
+
+.nav-menu a.active {
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+  border-left: 3px solid #667eea;
+  padding-left: 17px;
+}
+
+/* Navigation icons */
+.nav-icon {
+  font-size: 1.2rem;
+  min-width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Section headers (collapsible) */
+.nav-section-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;   /* ← change from space-between to flex-start */
+  position: relative;             /* ← add this */
+  padding: 12px 20px;
+  background: none;
+  border: none;
+  color: #b8bcc8;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-align: left;
+  transition: all 0.2s ease;
+  gap: 10px;
+}
+
+.nav-section-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
+.nav-section-header.submenu-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 20px;
+}
+
+/* Accordion arrow */
+.accordion-arrow {
+  position: absolute;             /* ← add this */
+  right: 20px;                    /* ← add this */
+  font-size: 0.7rem;
+  transition: transform 0.3s ease;
+  opacity: 0.6;
+}
+
+.accordion-arrow.open {
+  transform: rotate(180deg);
+}
+
+/* Submenu styles */
+.nav-submenu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.nav-submenu li {
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.nav-submenu a {
+  padding: 10px 20px 10px 45px;
+  font-size: 0.9rem;
+}
+
+.nav-submenu .nav-submenu a {
+  padding-left: 65px;
+  font-size: 0.85rem;
+}
+
+/* Dynamic application buttons */
+.nav-link-button {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 12px 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #b8bcc8;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.nav-link-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  padding-left: 25px;
+}
+
+.nav-link-button.active {
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+  border-left: 3px solid #667eea;
+  padding-left: 17px;
+}
+
+.nav-link-button .nav-icon {
+  font-size: 1.2rem;
+  min-width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Nested section within submenu */
+.nav-submenu .nav-section {
+  border: none;
+}
+
+.nav-submenu .nav-section-header {
+  padding: 8px 15px 8px 35px;
+  font-size: 0.9rem;
+}
+
+.nav-submenu .nav-section-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Text overflow handling for long app names */
+.nav-link-button span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+/* Scrollbar styles */
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Loading state for dynamic applications */
+.nav-loading {
+  padding: 12px 20px;
+  color: #b8bcc8;
+  font-size: 0.9rem;
+  text-align: center;
+  opacity: 0.6;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+}
+
+/* Focus styles for accessibility */
+.nav-menu a:focus,
+.nav-section-header:focus,
+.nav-link-button:focus {
+  outline: 2px solid #667eea;
+  outline-offset: -2px;
+}
+
+/* Animation for dynamic application items */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nav-link-button {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+/* Ensure proper spacing for nested items */
+.nav-submenu .nav-section .nav-submenu {
+  margin-left: 0;
+}
+
+/* Highlight for dynamically loaded app items */
+.nav-link-button::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: #667eea;
+  transition: width 0.2s ease;
+}
+
+.nav-link-button:hover::before {
+  width: 3px;
+}
+
+/* Separator between sections (optional) */
+.nav-section + .nav-section {
+  margin-top: 5px;
+}
+
+
+@@ -0,0 +1,37 @@
+/* Navigation.css */
+.sidebar-footer {
+  margin-top: auto;
+  padding: var(--space-lg);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.user-details {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: #ecf0f1;
+}
+
+.user-icon {
+  font-size: 1.5rem;
+}
+
+.username {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.user-role {
+  font-size: 0.8rem;
+  color: #bdc3c7;
+}
+
+.logout-btn {
+  align-self: flex-start;
+}

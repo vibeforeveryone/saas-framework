@@ -1,0 +1,60 @@
+/*
+ * Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+ * Author: Christopher Niven
+ */
+.notifications-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.notification-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--gray-lightest);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  position: relative;
+}
+
+.notification-item:hover {
+  background: var(--gray-light);
+  transform: translateX(4px);
+}
+
+.notification-item.unread {
+  background: #e3f2fd;
+  border-left: 4px solid var(--primary-blue);
+}
+
+.notif-icon {
+  font-size: 2rem;
+}
+
+.notif-content h4 {
+  margin: 0 0 var(--space-xs) 0;
+  color: var(--text-primary);
+}
+
+.notif-content p {
+  margin: 0 0 var(--space-xs) 0;
+  color: var(--text-secondary);
+}
+
+.notif-content small {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.unread-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--primary-blue);
+  border-radius: 50%;
+  position: absolute;
+  top: var(--space-lg);
+  right: var(--space-lg);
+}

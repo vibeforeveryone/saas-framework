@@ -1,0 +1,4340 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Provider Manager - SaaS Application Management System (HTTP API)
+
+###original
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+
+    AllowedValues:
+      - dev
+      - prod
+    Description: Environment name
+  CorsOrigin:
+    Type: String
+    Default: 'http://localhost:3000'
+    Description: >
+      The exact origin of the React frontend (used in Access-Control-Allow-Origin).
+      dev:  http://localhost:3000
+      prod: https://your-production-domain.com
+
+
+###proposed for security
+
+# Parameters:
+#   Environment:
+#     Type: String
+#     Default: dev
+#     AllowedValues:
+#       - dev
+#       - prod
+#     Description: Deployment environment — controls cookie SameSite attribute and CORS origin
+
+#   FrontendOrigin:
+#     Type: String
+#     Default: "http://localhost:3000"
+#     Description: >
+#       The exact origin of the React frontend (used in Access-Control-Allow-Origin).
+#       dev:  http://localhost:3000
+#       prod: https://your-production-domain.com
+
+
+
+# ###final
+# Parameters:
+#   Environment:
+#     Type: String
+#     Default: prod
+#     AllowedValues:
+#       - dev
+#       - prod
+#     Description: Environment name
+
+#   CorsOrigin:
+#     Type: String
+#     Description: CORS origin URL for the application
+#     Default: 'http://localhost:3000'
+#     dev:  http://localhost:3000
+#     prod: https://your-production-domain.com
+
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.13
+    Environment:
+      Variables:
+        JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+        CORS_ORIGIN: !Ref CorsOrigin
+        ENVIRONMENT: !Ref Environment
+        LOG_LEVEL: INFO
+        LOG_API_CALL_FUNCTION: "log-api-call"
+    
+    
+
+Resources:
+
+  # MyLogGroup:
+  #   Type: AWS::Logs::LogGroup
+  #   Properties:
+  #     LogGroupName: /vibe-core/logs
+  #     RetentionInDays: 7
+
+## ==========================================
+  # SNS TOPIC FOR REPORT NOTIFICATIONS
+  # ==========================================
+
+  #ReportNotificationTopic:
+  #  Type: AWS::SNS::Topic
+  #  Properties:
+  #    TopicName: !Sub "report-notifications"
+  #    DisplayName: Report Notifications
+  #    Tags:
+  #      - Key: Application
+  #        Value: ProviderManager
+
+
+  # DynamoDB Table
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: Customers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: customer_name
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customer_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: CustomerIndex
+          KeySchema:
+            - AttributeName: customer_name
+              KeyType: HASH
+            - AttributeName: customer_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: EmailIndex
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  # DynamoDB Tables  usage and auth
+  UsageTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: UsageTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: company_name
+          AttributeType: S
+        - AttributeName: app_name
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: user_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_name
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: CustomerIndex
+          KeySchema:
+            - AttributeName: company_name
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: AppIndex
+          KeySchema:
+            - AttributeName: app_name
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        
+ 
+
+  # ==========================================
+  # DYNAMODB TABLES 
+  # ==========================================
+
+  RefreshTokensTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "RefreshTokens"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: token_id
+          AttributeType: S
+        - AttributeName: user_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: token_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user_key-index
+          KeySchema:
+            - AttributeName: user_key
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at    # DynamoDB auto-purges expired tokens — no housekeeping needed
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+        - Key: Environment
+          Value: !Ref Environment
+
+
+
+  
+  RoleTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "Role"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: role_key
+          AttributeType: S
+        - AttributeName: role_desc
+          AttributeType: S
+      KeySchema:
+        - AttributeName: role_key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: role_desc-index
+          KeySchema:
+            - AttributeName: role_desc
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  FeatureTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "Feature"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: feature_key
+          AttributeType: S
+        - AttributeName: feature_desc
+          AttributeType: S
+      KeySchema:
+        - AttributeName: feature_key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: feature_desc-index
+          KeySchema:
+            - AttributeName: feature_desc
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  LicenseTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "License"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: license_key
+          AttributeType: S
+        - AttributeName: license_type
+          AttributeType: S
+        - AttributeName: is_active_str
+          AttributeType: S
+      KeySchema:
+        - AttributeName: license_key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: license_type-is_active_str-index
+          KeySchema:
+            - AttributeName: license_type
+              KeyType: HASH
+            - AttributeName: is_active_str
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+
+  CustomerLicenseHistoryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "CustomerLicenseHistory"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: history_key
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: effective_date
+          AttributeType: S
+        - AttributeName: end_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: history_key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: customer_id-effective_date-index
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: effective_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: customer_id-end_date-index
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: end_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+
+
+
+  UserTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "User"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_key
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: user_name
+          AttributeType: S
+        - AttributeName: user_email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: customer_id-user_name-index
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: user_name
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: user_email-index
+          KeySchema:
+            - AttributeName: user_email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+ 
+  #  UserRole Table:
+  # PK: user_key (HASH) + role_key (RANGE)
+  # GSI: role_key-index  — used by delete_role to check if a role is in use
+  # GSI: customer_id-index — used by admins to list all assignments for their tenant
+  UserRoleTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "UserRole"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_key
+          AttributeType: S
+        - AttributeName: role_key
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_key
+          KeyType: HASH
+        - AttributeName: role_key
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: role_key-index
+          KeySchema:
+            - AttributeName: role_key
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: customer_id-index
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+  
+ 
+  # PK: user_key (HASH) + feature_key (RANGE)
+  # GSI: feature_key-index — used by delete_feature to check if a feature is in use
+  # GSI: customer_id-index — used by admins to list all assignments for their tenant
+  UserFeatureTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "UserFeature"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_key
+          AttributeType: S
+        - AttributeName: feature_key
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_key
+          KeyType: HASH
+        - AttributeName: feature_key
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: feature_key-index
+          KeySchema:
+            - AttributeName: feature_key
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: customer_id-index
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  PaymentProcessorConfigTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "PaymentProcessorConfig"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: processor_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customer_id
+          KeyType: HASH
+        - AttributeName: processor_name
+          KeyType: RANGE
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  PaymentTransactionTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "PaymentTransaction"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: transaction_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: transaction_key
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: transaction_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: customer_id-created_at-index
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: transaction_key-index
+          KeySchema:
+            - AttributeName: transaction_key
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-created_at-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  DisputeTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "Dispute"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: dispute_id
+          AttributeType: S
+        - AttributeName: transaction_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: dispute_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: transaction_id-index
+          KeySchema:
+            - AttributeName: transaction_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-created_at-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  WebhookEventTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "WebhookEvent"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: webhook_key
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: webhook_key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: customer_id-created_at-index
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-created_at-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  NotificationTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "Notification"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: notification_id
+          AttributeType: S
+        - AttributeName: user_key
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: notification_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user_key-created_at-index
+          KeySchema:
+            - AttributeName: user_key
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+
+        # ==========================================
+  # ADDITIONAL TABLES FOR ANALYTICS
+  # ==========================================
+
+  ReportsTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: "Reports"
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: customer_id
+            AttributeType: S
+          - AttributeName: reportId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+        KeySchema:
+          - AttributeName: customer_id
+            KeyType: HASH
+          - AttributeName: reportId
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: reportId-index
+            KeySchema:
+              - AttributeName: reportId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: customer_id-createdAt-index
+            KeySchema:
+              - AttributeName: customer_id
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        Tags:
+          - Key: Application
+            Value: ProviderManager
+
+  DashboardMetricsTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: "DashboardMetrics"
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: customer_id
+            AttributeType: S
+          - AttributeName: metricDate
+            AttributeType: S
+        KeySchema:
+          - AttributeName: customer_id
+            KeyType: HASH
+          - AttributeName: metricDate
+            KeyType: RANGE
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+        Tags:
+          - Key: Application
+            Value: ProviderManager
+
+  ExportJobsTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: "ExportJobs"
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: customer_id
+            AttributeType: S
+          - AttributeName: jobId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+        KeySchema:
+          - AttributeName: customer_id
+            KeyType: HASH
+          - AttributeName: jobId
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: customer_id-createdAt-index
+            KeySchema:
+              - AttributeName: customer_id
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        Tags:
+          - Key: Application
+            Value: ProviderManager
+
+  KpiMetricsTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: "KpiMetrics"
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: metricName
+            AttributeType: S
+          - AttributeName: timestamp
+            AttributeType: S
+          - AttributeName: customer_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: metricName
+            KeyType: HASH
+          - AttributeName: timestamp
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: customer_id-timestamp-index
+            KeySchema:
+              - AttributeName: customer_id
+                KeyType: HASH
+              - AttributeName: timestamp
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        Tags:
+          - Key: Application
+            Value: ProviderManager
+
+  ScheduledReportsTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: "ScheduledReports"
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: customer_id
+            AttributeType: S
+          - AttributeName: scheduleId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: customer_id
+            KeyType: HASH
+          - AttributeName: scheduleId
+            KeyType: RANGE
+        Tags:
+          - Key: Application
+            Value: ProviderManager
+
+  UsageMetricsTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: "UsageMetrics"
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: customer_id
+            AttributeType: S
+          - AttributeName: metricDate
+            AttributeType: S
+          - AttributeName: appKey
+            AttributeType: S
+        KeySchema:
+          - AttributeName: customer_id
+            KeyType: HASH
+          - AttributeName: metricDate
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: appKey-metricDate-index
+            KeySchema:
+              - AttributeName: appKey
+                KeyType: HASH
+              - AttributeName: metricDate
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        Tags:
+          - Key: Application
+            Value: ProviderManager
+
+ 
+   # ==============================================
+  # EMAIL VERIFICATION CODE TABLE
+  # ==============================================
+  EmailVerificationCodesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: EmailVerificationCodes
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: code_id
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: code_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: email-timestamp-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+
+  EventsLogTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "EventsLog"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+        - AttributeName: eventType
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customer_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: eventType-timestamp-index
+          KeySchema:
+            - AttributeName: eventType
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: userId-timestamp-index
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ==========================================
+  # API CALL TRACKING TABLE
+  # ==========================================
+
+  ApiCallTrackingTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: "ApiCallTracking"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: timestamp_request_id
+          AttributeType: S
+        - AttributeName: user_key
+          AttributeType: S
+        - AttributeName: http_path
+          AttributeType: S
+        - AttributeName: function_name
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customer_id
+          KeyType: HASH
+        - AttributeName: timestamp_request_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: user_key-timestamp_request_id-index
+          KeySchema:
+            - AttributeName: user_key
+              KeyType: HASH
+            - AttributeName: timestamp_request_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: http_path-timestamp_request_id-index
+          KeySchema:
+            - AttributeName: http_path
+              KeyType: HASH
+            - AttributeName: timestamp_request_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: function_name-timestamp_request_id-index
+          KeySchema:
+            - AttributeName: function_name
+              KeyType: HASH
+            - AttributeName: timestamp_request_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  UtilsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: utils-layer
+      ContentUri: layers/utils/
+      CompatibleRuntimes:
+        - python3.13
+      RetentionPolicy: Retain
+
+
+  # ==========================================
+  # HTTP API GATEWAY (NEW)
+  # ==========================================
+
+  ProviderManagerHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: v1
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Content-Type
+          - X-Amz-Date
+          - Authorization
+          - X-Api-Key
+          - X-Amz-Security-Token
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        MaxAge: 600
+
+
+
+  # ==============================================
+  # PUBLIC SIGNUP LAMBDA FUNCTIONS
+  # ==============================================
+
+
+  # ==========================================
+  # LAMBDA FUNCTION - API CALL TRACKING
+  # ==========================================
+
+  LogApiCallFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "log-api-call"
+      CodeUri: src/api_tracking/
+      Handler: log_api_call.lambda_handler
+      Runtime: python3.13
+      Timeout: 10
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ApiCallTrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+ 
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          API_CALL_TRACKING_TABLE: !Ref ApiCallTrackingTable
+      Tags:
+        Application: ProviderManager
+        Environment: !Ref Environment
+
+  # Send Verification Code Function
+  SendVerificationCodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "send-verification-code"
+      CodeUri: src/public
+      Handler: send_verification_code.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      Layers:
+         - !Ref UtilsLayer
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          VERIFICATION_TABLE: !Ref EmailVerificationCodesTable
+          # FROM_EMAIL: !Sub "noreply@${Environment}.yourdomain.com"
+          FROM_EMAIL: !Sub "chrisniven@vibeforeveryone.com"
+          # AWS_REGION: !Ref AWS::Region
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmailVerificationCodesTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+ 
+              
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /public/send-verification-code
+            Method: post
+
+  # Verify Email Code Function
+  VerifyEmailCodeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "verify-email-code"
+      CodeUri: src/public
+      Handler: verify_email_code.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      Layers:
+         - !Ref UtilsLayer
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          VERIFICATION_TABLE: !Ref EmailVerificationCodesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmailVerificationCodesTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+              
+
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /public/verify-email-code
+            Method: post
+
+  # Verify Payment Function
+  VerifyPaymentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "verify-payment"
+      CodeUri: src/public
+      Handler: verify_payment.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+          SYSTEM_COMPANY: system
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+              
+
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /public/verify-payment
+            Method: post
+
+  # Complete Public Signup Function
+  CompletePublicSignupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "complete-public-signup"
+      CodeUri: src/public/
+      Handler: complete_public_signup.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRoleTable
+
+        - DynamoDBReadPolicy:
+            TableName: !Ref RoleTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+        - Statement:
+            - Effect: Allow
+              Action: ses:SendEmail
+              Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+          USER_ROLE_TABLE: !Ref UserRoleTable
+          FROM_EMAIL: !Sub "chrisniven@vibeforeveryone.com"
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /public/complete-signup
+            Method: POST
+
+# =============================================================================
+# SECTION 8 — SEED CUSTOM RESOURCE (NEW — add after CompletePublicSignupFunction)
+# Runs once on stack Create and on every Update (idempotent).
+# Ensures Admin and Invoicing roles exist in the Role table.
+# =============================================================================
+
+  SeedRolesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "seed-roles"
+      CodeUri: src/roles/
+      Handler: seed_roles.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RoleTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          ROLE_TABLE: !Ref RoleTable
+
+  # Custom resource that invokes SeedRolesFunction during stack deployment.
+  # DependsOn RoleTable ensures the table exists before seeding.
+  SeedRolesCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - RoleTable
+      - SeedRolesFunction
+    Properties:
+      ServiceToken: !GetAtt SeedRolesFunction.Arn
+      # Bump this string to force re-seed on a stack update if needed:
+      Version: "1.0"
+
+
+
+  # =============================================================================
+# TEMPLATE.YAML — LICENSE SEED ADDITIONS
+# Add both blocks below alongside the existing SeedRolesFunction /
+# SeedRolesCustomResource blocks that were added in the roles redesign.
+# =============================================================================
+
+
+# =============================================================================
+# SECTION 1 — SEED LAMBDA FUNCTION
+# =============================================================================
+
+  SeedLicensesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "seed-licenses"
+      CodeUri: src/licenses/
+      Handler: seed_licenses.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          LICENSE_TABLE: !Ref LicenseTable
+
+
+# =============================================================================
+# DependsOn LicenseTable ensures the table exists before seeding.
+# DependsOn SeedLicensesFunction ensures the lambda is deployed first.
+# =============================================================================
+
+  SeedLicensesCustomResource:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - LicenseTable
+      - SeedLicensesFunction
+    Properties:
+      ServiceToken: !GetAtt SeedLicensesFunction.Arn
+      # Bump this string to force a re-seed on a future stack update:
+      Version: "1.0"
+
+
+  
+  # Check Email Availability Function
+  CheckEmailAvailableFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "check-email-available"
+      CodeUri: src/public
+      Handler: check_email_available.lambda_handler
+      Runtime: python3.13
+      Timeout: 10
+      Layers:
+         - !Ref UtilsLayer
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserTable
+
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+               
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /public/check-email
+            Method: post
+
+
+  # Lambda Functions
+  ListCustomersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "list-customers"
+      CodeUri: src/customers
+      Handler: list_customers.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomersTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+              
+
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi  # Use existing API
+            Path: /customers
+            Method: get
+
+  GetCustomerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "get-customer"
+      CodeUri: src/customers
+      Handler: get_customer.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomersTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+              
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi  # Use existing API
+            Path: /customers/{customer_id}
+            Method: get
+
+  CreateCustomerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "create-customer"
+      CodeUri: src/customers
+      Handler: create_customer.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref RoleTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRoleTable
+              
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+              
+
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi  # Use existing API
+            Path: /customers
+            Method: post
+
+  UpdateCustomerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "update-customer"
+      CodeUri: src/customers
+      Handler: update_customer.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomersTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+              
+
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi  # Use existing API
+            Path: /customers/{customer_id}
+            Method: put
+
+  DeleteCustomerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "delete-customers"
+      CodeUri: src/customers
+      Handler: delete_customer.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBCrudPolicy: 
+            TableName: !Ref CustomersTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi  # Use existing API
+            Path: /customers/{customer_id}
+            Method: delete
+
+  SearchCustomersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "search-customers"
+      CodeUri: src/customers
+      Handler: search_customers.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomersTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+ 
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi  # Use existing API
+            Path: /customers/search
+            Method: post
+
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - APPLICATIONS
+  # ==========================================
+
+  CreateUsageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: create-usage
+      CodeUri: src/usage/
+      Handler: create_usage.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      Layers:
+         - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsageTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          DYNAMODB_TABLE: !Ref UsageTable
+          LOG_LEVEL: INFO
+
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+              
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi  # Use existing API
+            Path: /usage
+            Method: POST
+
+
+ 
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: auth
+      CodeUri: src/auth/
+      Handler: auth.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      Layers:
+        - !Ref UtilsLayer
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          REFRESH_TOKENS_TABLE:     !Ref RefreshTokensTable
+          ALLOWED_ORIGIN:           !Ref CorsOrigin
+          ENVIRONMENT:              !Ref Environment
+          REFRESH_TOKEN_TTL_HOURS:  "24"
+          LOG_LEVEL:                INFO
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RefreshTokensTable
+
+                #
+                # 3 places, bring action back in when aws secretsmanager create-secret has been run sucessfully (probably in vibe-studio) (2 steps install manager then create)
+                #
+                # THEN !!!!!!!!!!!!!!!!!!!!!!!!!!
+                #
+                # One Thing to Watch After Deploying
+                # The /auth/refresh call in AuthContext.js uses a relative URL (/auth/refresh). During local dev this will resolve against localhost:3000, not API Gateway. You'll need to either proxy it in your package.json:
+                # json"proxy": "https://<your-api-gateway-url>"
+                #
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /auth
+            Method: POST
+
+
+# -----------------------------------------------------------------------------
+# 4. NEW LAMBDA: RefreshTokenFunction
+# Add this as a new function alongside AuthFunction
+# -----------------------------------------------------------------------------
+
+  RefreshTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: refresh-token
+      CodeUri: src/auth/
+      Handler: refresh_token.lambda_handler
+      Runtime: python3.13
+      Timeout: 30
+      Layers:
+        - !Ref UtilsLayer
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          REFRESH_TOKENS_TABLE:     !Ref RefreshTokensTable
+          ALLOWED_ORIGIN:           !Ref CorsOrigin
+          ENVIRONMENT:              !Ref Environment
+          REFRESH_TOKEN_TTL_HOURS:  "24"
+          LOG_LEVEL:                INFO
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RefreshTokensTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /auth/refresh
+            Method: POST
+
+
+# -----------------------------------------------------------------------------
+# 5. NEW LAMBDA: LogoutFunction
+# Add this as a new function alongside AuthFunction
+# -----------------------------------------------------------------------------
+
+  LogoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: logout
+      CodeUri: src/auth/
+      Handler: logout.lambda_handler
+      Runtime: python3.13
+      Timeout: 15
+      Layers:
+        - !Ref UtilsLayer
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          REFRESH_TOKENS_TABLE:  !Ref RefreshTokensTable
+          ALLOWED_ORIGIN:        !Ref CorsOrigin
+          ENVIRONMENT:           !Ref Environment
+          LOG_LEVEL:             INFO
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RefreshTokensTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /auth/logout
+            Method: POST
+
+ 
+  
+  #
+  # additional analytics
+  #
+
+  CustomReportGeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "custom-report-generator"
+      CodeUri: src/analytics/
+      Handler: custom_report_generator.lambda_handler
+      Runtime: python3.13
+      Timeout: 300
+      Layers:
+         - !Ref UtilsLayer      
+      MemorySize: 1024
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsLogTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReportsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ReportsBucket
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+  
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          EVENTS_LOG_TABLE: !Ref EventsLogTable
+          REPORTS_TABLE: !Ref ReportsTable
+          REPORTS_BUCKET: !Ref ReportsBucket
+      Events:
+        CreateReport:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/custom
+            Method: POST
+        ListReports:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/custom
+            Method: GET
+        GetReport:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/custom/{reportId}
+            Method: GET
+        DeleteReport:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/custom/{reportId}
+            Method: DELETE
+
+  DashboardAggregatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "dashboard-aggregator"
+      CodeUri: src/analytics/
+      Handler: dashboard_aggregator.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsLogTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DashboardMetricsTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          EVENTS_LOG_TABLE: !Ref EventsLogTable
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+          CUSTOMER_APPLICATION_LICENSE_TABLE: !Ref CustomerLicenseHistoryTable
+          USER_TABLE: !Ref UserTable
+          DASHBOARD_METRICS_TABLE: !Ref DashboardMetricsTable
+      Events:
+        GetDashboard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /dashboard/metrics
+            Method: GET
+        RefreshDashboard:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /dashboard/metrics/refresh
+            Method: POST
+
+  DataExportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "data-export"
+      CodeUri: src/analytics/
+      Handler: data_export.lambda_handler
+      Runtime: python3.13
+      Timeout: 300
+      Layers:
+         - !Ref UtilsLayer      
+      MemorySize: 1024
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsLogTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomersTable
+        - S3CrudPolicy:
+            BucketName: !Ref ReportsBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ExportJobsTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+  
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          EVENTS_LOG_TABLE: !Ref EventsLogTable
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+          USER_TABLE: !Ref UserTable
+          CUSTOMERS_TABLE: !Ref CustomersTable
+          REPORTS_BUCKET: !Ref ReportsBucket
+          EXPORT_JOBS_TABLE: !Ref ExportJobsTable
+      Events:
+        CreateExport:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /export
+            Method: POST
+        GetExport:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /export/{jobId}
+            Method: GET
+        ListExports:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /export
+            Method: GET
+
+  KpiTrackingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "kpi-tracking"
+      CodeUri: src/analytics/
+      Handler: kpi_tracking.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsLogTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref KpiMetricsTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+  
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          EVENTS_LOG_TABLE: !Ref EventsLogTable
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+          CUSTOMER_APPLICATION_LICENSE_TABLE: !Ref CustomerLicenseHistoryTable
+          KPI_METRICS_TABLE: !Ref KpiMetricsTable
+      Events:
+        GetKpis:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /kpi
+            Method: GET
+        GetKpiHistory:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /kpi/{metricName}/history
+            Method: GET
+#        ScheduledCalculation:
+#          Type: Schedule
+#          Properties:
+#            Schedule: rate(1 hour)
+#            Description: Calculate KPIs hourly
+
+  ScheduledReportsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "scheduled-reports"
+      CodeUri: src/analytics/
+      Handler: scheduled_reports.lambda_handler
+      Runtime: python3.13
+      Timeout: 300
+      Layers:
+         - !Ref UtilsLayer      
+      MemorySize: 1024
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScheduledReportsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsLogTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+  
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - S3CrudPolicy:
+            BucketName: !Ref ReportsBucket
+##        - SNSPublishMessagePolicy:
+##            TopicName: !GetAtt ReportNotificationTopic.TopicName
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          SCHEDULED_REPORTS_TABLE: !Ref ScheduledReportsTable
+          EVENTS_LOG_TABLE: !Ref EventsLogTable
+          REPORTS_BUCKET: !Ref ReportsBucket
+##         NOTIFICATION_TOPIC_ARN: !Ref ReportNotificationTopic
+      Events:
+        CreateSchedule:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/scheduled
+            Method: POST
+        ListSchedules:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/scheduled
+            Method: GET
+        UpdateSchedule:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/scheduled/{scheduleId}
+            Method: PUT
+        DeleteSchedule:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /reports/scheduled/{scheduleId}
+            Method: DELETE
+#        DailyExecution:
+#          Type: Schedule
+#          Properties:
+#            Schedule: cron(0 2 * * ? *)
+#            Description: Execute scheduled reports daily at 2 AM UTC
+
+  UsageAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "usage-analytics"
+      CodeUri: src/analytics/
+      Handler: usage_analytics.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EventsLogTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsageMetricsTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+  
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          EVENTS_LOG_TABLE: !Ref EventsLogTable
+          CUSTOMER_APPLICATION_LICENSE_TABLE: !Ref CustomerLicenseHistoryTable
+          USAGE_METRICS_TABLE: !Ref UsageMetricsTable
+      Events:
+        GetUsageAnalytics:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /analytics/usage
+            Method: GET
+        GetCompanyUsage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /analytics/usage/{customer_id}
+            Method: GET
+        GetAppUsage:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /analytics/usage/app/{appKey}
+            Method: GET
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - ROLES
+  # ==========================================
+
+  
+  CreateRoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "create-role"
+      CodeUri: src/roles/
+      Handler: create_role.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RoleTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          ROLE_TABLE: !Ref RoleTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /roles
+            Method: POST
+
+  ListRolesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-roles"
+      CodeUri: src/roles/
+      Handler: list_roles.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref RoleTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+ 
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          ROLE_TABLE: !Ref RoleTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /roles
+            Method: GET
+
+  UpdateRoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "update-role"
+      CodeUri: src/roles/
+      Handler: update_role.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RoleTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          ROLE_TABLE: !Ref RoleTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /roles/{role_key}
+            Method: PUT
+
+  DeleteRoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "delete-role"
+      CodeUri: src/roles/
+      Handler: delete_role.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RoleTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserRoleTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          ROLE_TABLE: !Ref RoleTable
+          USER_ROLE_TABLE: !Ref UserRoleTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /roles/{role_key}
+            Method: DELETE
+
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - FEATURES
+  # ==========================================
+
+  CreateFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "create-feature"
+      CodeUri: src/features/
+      Handler: create_feature.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FeatureTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          FEATURE_TABLE: !Ref FeatureTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /features
+            Method: POST
+
+  ListFeaturesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-features"
+      CodeUri: src/features/
+      Handler: list_features.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref FeatureTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          FEATURE_TABLE: !Ref FeatureTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /features
+            Method: GET
+
+  UpdateFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "update-feature"
+      CodeUri: src/features/
+      Handler: update_feature.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FeatureTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          FEATURE_TABLE: !Ref FeatureTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /features/{feature_key}
+            Method: PUT
+
+  DeleteFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "delete-feature"
+      CodeUri: src/features/
+      Handler: delete_feature.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FeatureTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserFeatureTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          FEATURE_TABLE: !Ref FeatureTable
+          USER_FEATURE_TABLE: !Ref UserFeatureTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /features/{feature_key}
+            Method: DELETE
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - LICENSES
+  # ==========================================
+
+  CreateLicenseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "create-license"
+      CodeUri: src/licenses/
+      Handler: create_license.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          LICENSE_TABLE: !Ref LicenseTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /licenses
+            Method: POST
+
+  ListLicensesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-licenses"
+      CodeUri: src/licenses/
+      Handler: list_licenses.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          LICENSE_TABLE: !Ref LicenseTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /licenses
+            Method: GET
+
+  UpdateLicenseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "update-license"
+      CodeUri: src/licenses/
+      Handler: update_license.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          LICENSE_TABLE: !Ref LicenseTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /licenses/{license_key}
+            Method: PUT
+
+  DeactivateLicenseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "deactivate-license"
+      CodeUri: src/licenses/
+      Handler: deactivate_license.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          LICENSE_TABLE: !Ref LicenseTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /licenses/{license_key}/deactivate
+            Method: PUT
+
+
+
+# ==========================================
+  # LAMBDA FUNCTIONS - Customer Licensce
+  # ==========================================
+
+  GetCustomerLicenseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-customer-license"
+      CodeUri: src/licenses/
+      Handler: get_customer_license.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          CUSTOMER_LICENSE_HISTORY_TABLE: !Ref CustomerLicenseHistoryTable
+          LICENSE_TABLE: !Ref LicenseTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/license
+            Method: GET
+
+  AssignCustomerLicenseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "assign-customer-license"
+      CodeUri: src/licenses/
+      Handler: assign_customer_license.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          CUSTOMER_LICENSE_HISTORY_TABLE: !Ref CustomerLicenseHistoryTable
+          LICENSE_TABLE: !Ref LicenseTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/license
+            Method: POST
+
+  GetCustomerLicenseHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-customer-license-history"
+      CodeUri: src/licenses/
+      Handler: get_customer_license_history.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref LicenseTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          CUSTOMER_LICENSE_HISTORY_TABLE: !Ref CustomerLicenseHistoryTable
+          LICENSE_TABLE: !Ref LicenseTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/license/history
+            Method: GET
+
+
+
+  
+
+ 
+
+
+
+
+
+  
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - USERS
+  # ==========================================
+
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "create-user"
+      CodeUri: src/users/
+      Handler: create_user.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users
+            Method: POST
+
+  ListUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-users"
+      CodeUri: src/users/
+      Handler: list_users.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users
+            Method: GET
+
+  GetUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-user"
+      CodeUri: src/users/
+      Handler: get_user.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}
+            Method: GET
+
+  UpdateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "update-user"
+      CodeUri: src/users/
+      Handler: update_user.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}
+            Method: PUT
+
+  UpdateUserStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "update-user-status"
+      CodeUri: src/users/
+      Handler: update_user_status.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/status
+            Method: PUT
+
+  DeleteUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "delete-user"
+      CodeUri: src/users/
+      Handler: delete_user.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}
+            Method: DELETE
+
+  AssignUserRoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "assign-user-role"
+      CodeUri: src/user_assignments/
+      Handler: assign_user_role.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRoleTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref RoleTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_ROLE_TABLE: !Ref UserRoleTable
+          ROLE_TABLE: !Ref RoleTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/roles
+            Method: POST
+
+  RemoveUserRoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "remove-user-role"
+      CodeUri: src/user_assignments/
+      Handler: remove_user_role.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserRoleTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_ROLE_TABLE: !Ref UserRoleTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/roles/{role_key}
+            Method: DELETE
+
+  ListUserRolesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-user-roles"
+      CodeUri: src/user_assignments/
+      Handler: list_user_roles.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserRoleTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref RoleTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_ROLE_TABLE: !Ref UserRoleTable
+          ROLE_TABLE: !Ref RoleTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/roles
+            Method: GET
+
+
+
+
+
+  AssignUserFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "assign-user-feature"
+      CodeUri: src/user_assignments/
+      Handler: assign_user_feature.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserFeatureTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref FeatureTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_FEATURE_TABLE: !Ref UserFeatureTable
+          FEATURE_TABLE: !Ref FeatureTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/features
+            Method: POST
+
+  RemoveUserFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "remove-user-feature"
+      CodeUri: src/user_assignments/
+      Handler: remove_user_feature.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserFeatureTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_FEATURE_TABLE: !Ref UserFeatureTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/features/{feature_key}
+            Method: DELETE
+
+  ListUserFeaturesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-user-features"
+      CodeUri: src/user_assignments/
+      Handler: list_user_features.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UserFeatureTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref FeatureTable
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_FEATURE_TABLE: !Ref UserFeatureTable
+          FEATURE_TABLE: !Ref FeatureTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/features
+            Method: GET
+
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - PAYMENT PROCESSORS
+  # ==========================================
+
+  CreateProcessorConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "create-processor-config"
+      CodeUri: src/payment_processors/
+      Handler: create_processor_config.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/processors
+            Method: POST
+
+  ListProcessorConfigsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-processor-configs"
+      CodeUri: src/payment_processors/
+      Handler: list_processor_configs.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/processors
+            Method: GET
+
+  GetProcessorConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-processor-config"
+      CodeUri: src/payment_processors/
+      Handler: get_processor_config.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/processors/{processor_name}
+            Method: GET
+
+  UpdateProcessorConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "update-processor-config"
+      CodeUri: src/payment_processors/
+      Handler: update_processor_config.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/processors/{processor_name}
+            Method: PUT
+
+  DeleteProcessorConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "delete-processor-config"
+      CodeUri: src/payment_processors/
+      Handler: delete_processor_config.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/processors/{processor_name}
+            Method: DELETE
+
+  ActivateProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "activate-processor"
+      CodeUri: src/payment_processors/
+      Handler: activate_processor.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/processors/{processor_name}/activate
+            Method: POST
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - TRANSACTIONS
+  # ==========================================
+
+  ProcessPaymentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "process-payment"
+      CodeUri: src/transactions/
+      Handler: process_payment.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentTransactionTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions
+            Method: POST
+
+  ListTransactionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-transactions"
+      CodeUri: src/transactions/
+      Handler: list_transactions.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions
+            Method: GET
+
+  GetTransactionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-transaction"
+      CodeUri: src/transactions/
+      Handler: get_transaction.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer     
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn 
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions/{transaction_id}
+            Method: GET
+
+  SearchTransactionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "search-transactions"
+      CodeUri: src/transactions/
+      Handler: search_transactions.lambda_handler
+      Layers:
+         - !Ref UtilsLayer
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions/search
+            Method: POST
+
+  RefundPaymentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "refund-payment"
+      CodeUri: src/transactions/
+      Handler: refund_payment.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentTransactionTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions/{transaction_id}/refund
+            Method: POST
+
+  VoidPaymentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "void-payment"
+      CodeUri: src/transactions/
+      Handler: void_payment.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentTransactionTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions/{transaction_id}/void
+            Method: POST
+
+  GetTransactionStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-transaction-status"
+      CodeUri: src/transactions/
+      Handler: get_transaction_status.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions/{transaction_id}/status
+            Method: GET
+
+  TransactionAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "transaction-analytics"
+      CodeUri: src/transactions/
+      Handler: transaction_analytics.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/transactions/analytics
+            Method: GET
+
+  GetCustomerHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-customer-history"
+      CodeUri: src/transactions/
+      Handler: get_customer_history.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentTransactionTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/customers/{customer_id}/history
+            Method: GET
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - DISPUTES
+  # ==========================================
+
+  CreateDisputeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "create-dispute"
+      CodeUri: src/disputes/
+      Handler: create_dispute.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DisputeTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          DISPUTE_TABLE: !Ref DisputeTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/disputes
+            Method: POST
+
+  ListDisputesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-disputes"
+      CodeUri: src/disputes/
+      Handler: list_disputes.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref DisputeTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          DISPUTE_TABLE: !Ref DisputeTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/disputes
+            Method: GET
+
+  RespondToDisputeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "respond-to-dispute"
+      CodeUri: src/disputes/
+      Handler: respond_to_dispute.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DisputeTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          DISPUTE_TABLE: !Ref DisputeTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/disputes/{dispute_id}/respond
+            Method: POST
+
+  UpdateDisputeStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "update-dispute-status"
+      CodeUri: src/disputes/
+      Handler: update_dispute_status.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DisputeTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          DISPUTE_TABLE: !Ref DisputeTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/disputes/{dispute_id}/status
+            Method: PUT
+
+  DisputeAnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "dispute-analytics"
+      CodeUri: src/disputes/
+      Handler: dispute_analytics.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref DisputeTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          DISPUTE_TABLE: !Ref DisputeTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/disputes/analytics
+            Method: GET
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - NOTIFICATIONS
+  # ==========================================
+
+  SendNotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "send-notification"
+      CodeUri: src/notifications/
+      Handler: send_notification.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NotificationTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          NOTIFICATION_TABLE: !Ref NotificationTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/notifications
+            Method: POST
+
+
+  EventLoggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "event-logger"
+      CodeUri: src/notifications/
+      Handler: event_logger.lambda_handler
+      Runtime: python3.13
+      # Stream batches can be large; 60 seconds is safe for analytics writes
+      Timeout: 60
+      Layers:
+        - !Ref UtilsLayer
+      Policies:
+        # Write events to EventsLog
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EventsLogTable
+        # Read webhook configs to fan out notifications
+        - DynamoDBReadPolicy:
+            TableName: !Ref WebhookEventTable
+        # CloudWatch custom metrics
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+        # SQS for webhook fan-out (queue URL supplied via env var)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: "*"
+        # Read permissions on all source table streams
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource:
+                - !GetAtt CustomersTable.StreamArn
+                - !GetAtt UserTable.StreamArn
+                - !GetAtt PaymentTransactionTable.StreamArn
+                - !GetAtt DisputeTable.StreamArn
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          EVENTS_LOG_TABLE:   !Ref EventsLogTable
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+          WEBHOOK_QUEUE_URL:  !Sub "https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/provider-manager-webhooks"
+          LOG_LEVEL:          "INFO"
+      # ── DynamoDB Stream triggers ────────────────────────────────────────
+      # Each source table gets its own named event. SAM creates a separate
+      # EventSourceMapping for each, so failures on one table do not block
+      # processing for the others.
+      Events:
+        CustomersStream:
+          Type: DynamoDB
+          Properties:
+            Stream:           !GetAtt CustomersTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize:        10
+            # Skip records that fail after 2 retries so one bad record
+            # cannot permanently stall the shard.
+            MaximumRetryAttempts: 2
+            BisectBatchOnFunctionError: true
+
+        UserStream:
+          Type: DynamoDB
+          Properties:
+            Stream:           !GetAtt UserTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize:        10
+            MaximumRetryAttempts: 2
+            BisectBatchOnFunctionError: true
+
+        PaymentTransactionStream:
+          Type: DynamoDB
+          Properties:
+            Stream:           !GetAtt PaymentTransactionTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize:        10
+            MaximumRetryAttempts: 2
+            BisectBatchOnFunctionError: true
+
+        DisputeStream:
+          Type: DynamoDB
+          Properties:
+            Stream:           !GetAtt DisputeTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize:        10
+            MaximumRetryAttempts: 2
+            BisectBatchOnFunctionError: true
+
+
+  NotificationPreferencesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "notification-preferences"
+      CodeUri: src/notifications/
+      Handler: notification_preferences.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          USER_TABLE: !Ref UserTable
+      Events:
+        HttpApiGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/notification-preferences
+            Method: GET
+        HttpApiPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/notification-preferences
+            Method: PUT
+
+  NotificationHistoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "notification-history"
+      CodeUri: src/notifications/
+      Handler: notification_history.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref NotificationTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          NOTIFICATION_TABLE: !Ref NotificationTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /customers/{customer_id}/users/{user_key}/notifications
+            Method: GET
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - WEBHOOKS
+  # ==========================================
+
+  WebhookMerchantOneFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "webhook-merchantone"
+      CodeUri: src/webhooks/
+      Handler: webhook_merchantone.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /webhooks/merchantone
+            Method: POST
+
+  WebhookPaysafeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "webhook-paysafe"
+      CodeUri: src/webhooks/
+      Handler: webhook_paysafe.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /webhooks/paysafe
+            Method: POST
+
+  WebhookPaymentNerdsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "webhook-paymentnerds"
+      CodeUri: src/webhooks/
+      Handler: webhook_paymentnerds.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PaymentProcessorConfigTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+          PAYMENT_PROCESSOR_CONFIG_TABLE: !Ref PaymentProcessorConfigTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /webhooks/paymentnerds
+            Method: POST
+
+  WebhookProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "webhook-processor"
+      CodeUri: src/webhooks/
+      Handler: webhook_processor.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PaymentTransactionTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomerLicenseHistoryTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+          PAYMENT_TRANSACTION_TABLE: !Ref PaymentTransactionTable
+          CUSTOMER_APPLICATION_LICENSE_TABLE: !Ref CustomerLicenseHistoryTable
+      Events:
+        DynamoDBStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt WebhookEventTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+
+  ListWebhooksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "list-webhooks"
+      CodeUri: src/webhooks/
+      Handler: list_webhooks.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref WebhookEventTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /webhooks
+            Method: GET
+
+  GetWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-webhook"
+      CodeUri: src/webhooks/
+      Handler: get_webhook.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref WebhookEventTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /webhooks/{webhook_key}
+            Method: GET
+
+  RetryWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "retry-webhook"
+      CodeUri: src/webhooks/
+      Handler: retry_webhook.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebhookEventTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /webhooks/{webhook_key}/retry
+            Method: POST
+
+  GetWebhookStatsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: "get-webhook-stats"
+      CodeUri: src/webhooks/
+      Handler: get_webhook_stats.lambda_handler
+      Runtime: python3.13
+      Timeout: 60
+      Layers:
+         - !Ref UtilsLayer      
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt LogApiCallFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vfeVer1/jwt-access-secret*"
+        - DynamoDBReadPolicy:
+            TableName: !Ref WebhookEventTable
+      Environment:
+        Variables:
+          JWT_SECRET_NAME: 'vfeVer1/jwt-access-secret'   # TODO: remove when Secrets Manager is wired up
+          WEBHOOK_EVENT_TABLE: !Ref WebhookEventTable
+      Events:
+        HttpApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ProviderManagerHttpApi
+            Path: /webhooks/stats
+            Method: GET
+
+  # ==========================================
+  # S3 BUCKET FOR REPORTS
+  # ==========================================
+
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "provider-manager-reports-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldReports
+            Status: Enabled
+            ExpirationInDays: 90
+      Tags:
+        - Key: Application
+          Value: ProviderManager
+
+  # ==========================================
+  # LAMBDA FUNCTIONS - Outputs
+  # ==========================================
+
+ 
+
+  
+
+
+Outputs:
+  ProviderManagerHttpApiUrl:
+    Description: "HTTP API Gateway endpoint URL"
+    Value: !Sub "https://${ProviderManagerHttpApi}.execute-api.${AWS::Region}.amazonaws.com/v1"
+##    Export:
+##      Name: !Sub "provider-manager-http-api-url"
+
+  ProviderManagerHttpApiId:
+    Description: "HTTP API Gateway ID"
+    Value: !Ref ProviderManagerHttpApi
+##    Export:
+##      Name: !Sub "provider-manager-http-api-id"
+
+
+  RefreshTokensTableName:
+    Description: "RefreshTokens DynamoDB table name"
+    Value: !Ref RefreshTokensTable
+
+  RefreshTokenFunctionArn:
+    Description: "Refresh Token Function ARN"
+    Value: !GetAtt RefreshTokenFunction.Arn
+
+  LogoutFunctionArn:
+    Description: "Logout Function ARN"
+    Value: !GetAtt LogoutFunction.Arn
+
+
+
+  UserTableName:
+    Description: "User DynamoDB table name"
+    Value: !Ref UserTable
+
+  EmailVerificationCodesTableName:
+    Description: "Email Verification Codes DynamoDB table name"
+    Value: !Ref EmailVerificationCodesTable
+
+  SendVerificationCodeFunctionArn:
+    Description: "Send Verification Code Function ARN"
+    Value: !GetAtt SendVerificationCodeFunction.Arn
+
+  VerifyEmailCodeFunctionArn:
+    Description: "Verify Email Code Function ARN"
+    Value: !GetAtt VerifyEmailCodeFunction.Arn
+
+  VerifyPaymentFunctionArn:
+    Description: "Verify Payment Function ARN"
+    Value: !GetAtt VerifyPaymentFunction.Arn
+
+  CompletePublicSignupFunctionArn:
+    Description: "Complete Public Signup Function ARN"
+    Value: !GetAtt CompletePublicSignupFunction.Arn
+
+  CheckEmailAvailableFunctionArn:
+    Description: "Check Email Available Function ARN"
+    Value: !GetAtt CheckEmailAvailableFunction.Arn
+
+  ReportsTableName:
+    Description: "Reports DynamoDB table name"
+    Value: !Ref ReportsTable
+
+  ReportsBucketName:
+    Description: "Reports S3 bucket name"
+    Value: !Ref ReportsBucket
+
+  DashboardMetricsTableName:
+    Description: "Dashboard Metrics DynamoDB table name"
+    Value: !Ref DashboardMetricsTable
+
+  ExportJobsTableName:
+    Description: "Export Jobs DynamoDB table name"
+    Value: !Ref ExportJobsTable
+
+  KpiMetricsTableName:
+    Description: "KPI Metrics DynamoDB table name"
+    Value: !Ref KpiMetricsTable
+
+  ScheduledReportsTableName:
+    Description: "Scheduled Reports DynamoDB table name"
+    Value: !Ref ScheduledReportsTable
+
+  UsageMetricsTableName:
+    Description: "Usage Metrics DynamoDB table name"
+    Value: !Ref UsageMetricsTable
+
+##  ReportNotificationTopicArn:
+##    Description: "SNS Topic ARN for report notifications"
+##    Value: !Ref ReportNotificationTopic
+
+
+  UsageTableName:
+    Description: Usage DynamoDB table name
+    Value: !Ref UsageTable
+
+
+  CustomersTableName:
+    Description: Customers DynamoDB table name
+    Value: !Ref CustomersTable
+
+
+
+

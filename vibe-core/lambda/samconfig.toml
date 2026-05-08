@@ -1,0 +1,25 @@
+version = 0.1
+
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "vibe-core"
+s3_bucket = "aws-sam-cli-vibe-core-deployment-bucket"
+s3_prefix = "vibe-core"
+region = "us-east-2"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=prod"
+image_repositories = []
+
+[prod]
+[prod.deploy]
+[prod.deploy.parameters]
+stack_name = "vibe-core"
+s3_bucket = "aws-sam-cli-vibe-core-deployment-bucket"
+s3_prefix = "vibe-core"
+region = "us-east-2"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=prod"
+image_repositories = []

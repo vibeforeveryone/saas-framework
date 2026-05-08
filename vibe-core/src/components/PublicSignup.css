@@ -1,0 +1,576 @@
+/*
+ * Copyright (c) 2026 Vibe For Everyone, LLC. All rights reserved.
+ * Author: Christopher Niven
+ */
+.public-signup {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.signup-container {
+  max-width: 900px;
+  margin: 0 auto;
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.signup-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 18px 30px;
+  text-align: center;
+}
+
+.signup-header h1 {
+  margin: 0 0 2px 0;
+  font-size: 2rem;
+}
+
+.signup-header p {
+  margin: 0;
+  font-size: 1rem;
+  opacity: 0.9;
+}
+
+.signup-section {
+  padding: 8px 30px 10px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.signup-section:last-child {
+  border-bottom: none;
+}
+
+.section-header {
+  margin-bottom: 4px;
+}
+
+.section-header h2 {
+  margin: 0 0 1px 0;
+  color: #333;
+  font-size: 1.35rem;
+}
+
+.section-header p {
+  margin: 0;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px 10px;
+}
+
+.form-group {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  grid-column: span 3;
+}
+
+.form-group.full-width {
+  grid-column: span 6;
+}
+
+.form-group.third-width {
+  grid-column: span 2;
+  grid-template-columns: 1fr;
+  gap: 1px;
+}
+
+.form-group.third-width label {
+  text-align: left;
+  padding-right: 0;
+  font-size: 0.78rem;
+}
+
+/* Special handling for checkbox fields with full-width */
+.form-group.full-width:has(input[type="checkbox"]) {
+  display: flex;
+  grid-template-columns: unset;
+}
+
+.form-group.full-width label {
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 0;
+}
+
+.form-group.full-width input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.form-group label {
+  margin: 0;
+  font-weight: 500;
+  color: #333;
+  font-size: 0.85rem;
+  text-align: right;
+  padding-right: 4px;
+  white-space: nowrap;
+}
+
+.form-group input,
+.form-group select {
+  padding: 5px 8px;
+  border: 2px solid #e0e0e0;
+  border-radius: 5px;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  height: 32px;
+  box-sizing: border-box;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.form-group input:disabled,
+.form-group select:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.form-group small {
+  grid-column: 2;
+  margin-top: -2px;
+  margin-bottom: 0;
+  font-size: 0.75rem;
+  color: #888;
+  line-height: 1.1;
+}
+
+.form-group.third-width small {
+  grid-column: 1;
+}
+
+.required {
+  color: #e74c3c;
+}
+
+.btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(17, 153, 142, 0.4);
+}
+
+.btn-link {
+  background: none;
+  color: #667eea;
+  padding: 4px 10px;
+  text-decoration: underline;
+}
+
+.btn-link:hover:not(:disabled) {
+  color: #764ba2;
+}
+
+.btn-lg {
+  padding: 10px 22px;
+  font-size: 0.95rem;
+}
+
+.btn-complete {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.alert {
+  padding: 8px 18px;
+  border-radius: 6px;
+  margin: 6px 30px;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.alert-danger {
+  background: #fee;
+  border-left: 4px solid #e74c3c;
+  color: #c0392b;
+}
+
+.alert-success {
+  background: #efe;
+  border-left: 4px solid #27ae60;
+  color: #1e8449;
+}
+
+.verification-box {
+  background: #f8f9fa;
+  border: 2px solid #667eea;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+
+.code-input-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-input-section p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.code-input-container {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0;
+}
+
+.code-input {
+  font-size: 1.6rem;
+  letter-spacing: 8px;
+  text-align: center;
+  width: 200px;
+  padding: 8px;
+  border: 3px solid #667eea;
+  border-radius: 6px;
+  font-weight: bold;
+}
+
+.code-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.timer {
+  font-size: 0.9rem;
+  color: #666;
+  margin: 4px 0;
+}
+
+.timer strong {
+  color: #667eea;
+  font-size: 1.1rem;
+}
+
+.verification-status {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: inline-block;
+}
+
+.verification-status.success {
+  background: #d4edda;
+  border: 2px solid #28a745;
+  color: #155724;
+}
+
+.applications-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.application-card {
+  background: #f8f9fa;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  transition: all 0.3s ease;
+}
+
+.application-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+}
+
+.application-card.selected {
+  background: #f0f4ff;
+  border-color: #667eea;
+  border-width: 3px;
+}
+
+.app-header {
+  margin-bottom: 4px;
+}
+
+.app-header label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.app-header input[type="checkbox"] {
+  margin-right: 6px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.app-description {
+  color: #666;
+  font-size: 0.8rem;
+  margin: 4px 0;
+  min-height: 28px;
+}
+
+.subscription-options {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 2px solid #e0e0e0;
+}
+
+.subscription-options .form-group {
+  margin-bottom: 4px;
+  grid-template-columns: 90px 1fr;
+  gap: 8px;
+}
+
+.subscription-options label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.subscription-options input[type="checkbox"] {
+  margin-right: 5px;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.info-text {
+  text-align: center;
+  color: #666;
+  font-style: italic;
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+
+.review-box {
+  background: #f8f9fa;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+
+.review-box h3 {
+  margin: 0 0 8px 0;
+  color: #333;
+  font-size: 1.15rem;
+}
+
+.review-item {
+  padding: 5px 0;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 0.9rem;
+}
+
+.review-item:last-child {
+  border-bottom: none;
+}
+
+.review-item strong {
+  color: #667eea;
+  display: inline-block;
+  min-width: 130px;
+}
+
+.review-item ul {
+  margin: 4px 0 0 0;
+  padding-left: 18px;
+}
+
+.review-item li {
+  padding: 2px 0;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.terms-box {
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 6px;
+  padding: 8px 12px;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.terms-box p {
+  margin: 0;
+  color: #856404;
+  font-size: 0.85rem;
+}
+
+/* Checkbox alignment for billing address */
+.form-group.checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-group.checkbox-group input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.form-group.checkbox-group label {
+  text-align: left;
+  padding: 0;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .signup-header h1 {
+    font-size: 1.6rem;
+  }
+  
+  .signup-section {
+    padding: 10px 16px;
+  }
+  
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  
+  .form-group {
+    grid-template-columns: 1fr;
+    grid-column: span 1;
+    gap: 3px;
+  }
+  
+  .form-group label {
+    text-align: left;
+    padding-right: 0;
+  }
+  
+  .form-group small {
+    grid-column: 1;
+  }
+  
+  .form-group.full-width,
+  .form-group.third-width {
+    grid-column: span 1;
+  }
+  
+  .applications-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .signup-container {
+    border-radius: 10px;
+  }
+  
+  .code-input {
+    width: 170px;
+    font-size: 1.4rem;
+    letter-spacing: 5px;
+  }
+  
+  .subscription-options .form-group {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Animation for success messages */
+@keyframes slideIn {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.alert {
+  animation: slideIn 0.3s ease-out;
+}
+
+/* Loading spinner */
+.btn:disabled::after {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Card number formatting */
+.card-logos {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.card-logo {
+  width: 50px;
+  height: 32px;
+  border-radius: 4px;
+  opacity: 0.3;
+  transition: opacity 0.3s ease;
+}
+
+.card-logo.active {
+  opacity: 1;
+}
