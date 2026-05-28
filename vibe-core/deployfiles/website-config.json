@@ -1,0 +1,8 @@
+{
+    "IndexDocument": {
+        "Suffix": "vibeforeveryone-web.html"
+    },
+    "ErrorDocument": {
+        "Key": "index.html"
+    }
+}
