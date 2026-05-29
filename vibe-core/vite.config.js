@@ -21,6 +21,6 @@ export default defineConfig({
   build: {
     // Keeps the same output folder name as CRA so any deployment scripts
     // that reference the 'build/' directory continue to work unchanged.
-    outDir: 'build',
+    outDir: 'dist',
   },
 });
