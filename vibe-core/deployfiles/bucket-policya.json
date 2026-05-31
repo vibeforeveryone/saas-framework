@@ -1,12 +1,49 @@
+
+
 {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "PublicReadGetObject",
-            "Effect": "Allow",
-            "Principal": "*",
-            "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::vcoreapp-app/*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowAmplifyToListPrefix",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "amplify.amazonaws.com"
+      },
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::~YOUR-BUCKET-NAME~",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "~AWS_ACCT_ID~",
+          "aws:SourceArn": "arn%3Aaws%3Aamplify%3A~AWS_REGION~%3A~AWS_ACCT_ID~%3Aapps%2F~APP_ID~%2Fbranches%2F~BRANCH_NAME~",
+          "s3:prefix": ""
         }
-    ]
+      }
+    },
+    {
+      "Sid": "AllowAmplifyToReadObjects",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "amplify.amazonaws.com"
+      },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::~YOUR-BUCKET-NAME~/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "~AWS_ACCT_ID~",
+          "aws:SourceArn": "arn%3Aaws%3Aamplify%3A~AWS_REGION~%3A~AWS_ACCT_ID~%3Aapps%2F~APP_ID~%2Fbranches%2F~BRANCH_NAME~"
+        }
+      }
+    },
+    {
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": "arn:aws:s3:::~YOUR-BUCKET-NAME~/*",
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    }
+  ]
 }
