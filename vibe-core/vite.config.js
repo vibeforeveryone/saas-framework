@@ -8,6 +8,7 @@ export default defineConfig({
  
   server: {
     port: 3000,
+    open: true,
  
     // Replaces the top-level "proxy" field that CRA read from package.json.
     proxy: {
