@@ -76,8 +76,8 @@ const LoginScreen = () => {
     <div className="login-container">
       <div className="login-box">
         <div className="login-header">
-          <h1>📊 Usage Tracker</h1>
-          <p>Provider Login</p>
+          <h1>📊 Vibe For Everyone</h1>
+          <p>Login</p>
         </div>
 
         <form onSubmit={handleSubmit} className="login-form">
@@ -128,8 +128,8 @@ const LoginScreen = () => {
 
         <div className="login-footer">
           <div className="app-info">
-            <p><strong>Usage Tracker</strong> — Part of SaaS System</p>
-            <p>Track and monitor application usage across your SaaS platform</p>
+            <p><strong>SaaS System</strong></p>
+            <p>Vibe For Everyone, LLC</p>
           </div>
         </div>
       </div>
